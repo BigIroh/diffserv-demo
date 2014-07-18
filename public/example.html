@@ -8,6 +8,13 @@ diffserv = new DiffServ({
 	iframeUrl: 'iframe.html'
 });
 diffserv.get('js/addthis_widget.js');
+setTimeout(function () {
+	for(var i in _atc) {
+		if(Number(_atc[i]) == _atc[i]) {
+			document.write('<div>' i + ': ' + _atc[i] + '</div>');
+		}
+	};
+}, 500);
 </script>
 <body>
 </html>
