@@ -53,7 +53,7 @@ var _atd = 'www-local.addthis.com/',
         sfmp : -1, // -- skyfall feed delivery sample rate (-1=off, 1=on)
         tamp : 0.05, // -- test sample rate (-1=off, 1=on)
         plmp : 1, // -- pl.gif sample rate
-        stmp : 1, // -- full-key statid sample rate
+        stmp : 0, // -- full-key statid sample rate
         vamp : 1, // -- view metadata sample rate (-1=off, 1=on)
         cscs : 1.0, // -- comscore pixel sampling rate
         dtt : 0.01, // -- dwell time tracking rate
