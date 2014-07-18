@@ -42,10 +42,10 @@ var _atd = 'www-local.addthis.com/',
         ver : 250,
         loc : 0,
         enote : '', // pre-filled email note
-        cwait : 1000, // menu close wait onmouseout in milliseconds
+        cwait : 500, // menu close wait onmouseout in milliseconds
         bamp : 1, // -- clickback sample rate (-1=off, 1=on)
         camp : 1, // -- classification sample rate (-1=off, 1=on)
-        csmp : 0.03, // -- clipboard copy sample rate
+        csmp : 0.0001, // -- clipboard copy sample rate
         damp : 1, // -- lo.json sample
         famp : 1.0, // -- file path referer sample rate (-1=off, 1=on)
         pamp : 1, // -- personalization sample rate (-1=off, 1=on)
