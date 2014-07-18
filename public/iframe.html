@@ -1,0 +1,391 @@
+<!doctype html><html><body><script>
+(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+var EventEmitter = function () {
+	this.listeners = {};
+};
+
+/**
+ * Add a handler for a message type 
+ *
+ * @param {string} type - message type
+ * @param {function} fn - handler to add
+ */
+EventEmitter.prototype.on = function (type, fn, ctx) {
+	var wrapped;
+
+	ctx = ctx || this;	
+	wrapped = function () {
+		fn.apply(ctx, Array.prototype.slice.call(arguments, 0));
+	};
+
+	fn.wrapped = wrapped;
+
+	if(!this.listeners[type]) {
+		this.listeners[type] = [wrapped];
+	}
+	else {
+		this.listeners[type].push(wrapped);
+	}
+};
+
+/**
+ * Add a handler for a message type which removes itself
+ * after a single execution
+ *
+ * @param {string} type - message type
+ * @param {function} fn - handler to add
+ */
+EventEmitter.prototype.once = function (type, fn, ctx) {
+	var wrapped;
+
+	ctx = ctx || this;
+
+	wrapped = function () {
+		ctx.off(type, fn);
+		fn.apply(ctx, Array.prototype.slice(arguments, 0));
+	};
+
+	fn.wrapped = wrapped;
+
+	if(!this.listeners[type]) {
+		this.listeners[type] = [wrapped];
+	}
+	else {
+		this.listeners[type].push(wrapped);
+	}	
+};
+
+/**
+ * Remove a handler for a message type 
+ *
+ * @param {string} type - message type
+ * @param {function} fn - handler to remove
+ */
+EventEmitter.prototype.off = function (type, fn) {
+	var index;
+
+	if(this.listeners[type]) {
+		index = this.listeners[type].indexOf(fn);
+		index2 = this.listeners[type].indexOf(fn.wrapped);
+		if(index > -1) {
+			this.listeners[type].splice(index, 1);
+			return true;
+		}
+		else if(index2 > -1) {
+			this.listeners[type].splice(index2, 1);
+			return true;
+		}
+		else {
+			return false;
+		}
+	}
+	else {
+		return false;
+	}
+};
+
+EventEmitter.prototype.emit = function (type) {
+	var payload = Array.prototype.slice.call(arguments, 1),
+		fns = this.listeners[type] || [],
+		i;
+
+	for(i=0; i<fns.length; i++) {
+		fns[i](payload);
+	}
+};
+
+module.exports = EventEmitter;
+},{}],2:[function(require,module,exports){
+var EventEmitter = require('./EventEmitter'),
+	Messenger;
+
+/**
+ * target {window} - window to communicate with
+ * domain {string}
+ */
+Messenger = function (target, domain) {
+	var ctx = this;
+
+	this.target = target;
+	this.domain = domain;
+	this.listeners = {};
+
+	//set up recieve message
+	if(this.target.postMessage) {
+		window.addEventListener('message', function (event) {
+			var i;
+			//coming from the right window, and we have listeners for it
+			if(event.source === ctx.target && ctx.listeners[event.data.type]) {
+				for(i=0; i<ctx.listeners[event.data.type].length; i++) {
+					ctx.listeners[event.data.type][i](event.data.content);	
+				}
+			}
+		});
+	}
+	else {
+		throw new Error('Browser not yet supported.');
+	}
+};
+
+Messenger.prototype = new EventEmitter();
+
+Messenger.prototype.post = function(type, content) {
+	var message = {
+		type: type,
+		content: content
+	};
+
+	/* @todo: set the domain here... security? */
+	if(this.target.postMessage) {
+		this.target.postMessage(message, '*');
+	}
+	else {
+		throw new Error('Browser not yet supported.');
+	}
+};
+
+
+
+
+module.exports = Messenger;
+},{"./EventEmitter":1}],3:[function(require,module,exports){
+var patch = require('./patch'),
+	JSONP = require('./JSONP'),
+	DiffStore;
+
+/**
+ * @param {object} options
+ * @param {string} [options.prefix='ds'] - prefix for localstorage
+ * @param {string} [options.root='/'] - root URL to request from
+ */
+DiffStore = function (options) {
+	this.root = '/';
+	this.prefix = 'ds';
+	this.localStorage = window.localStorage;
+	this.next = {};
+
+	if(options.root !== undefined) {
+		this.root = options.root;
+	}
+
+	if(options.prefix !== undefined) {
+		this.prefix = options.prefix;
+	}
+};
+
+/**
+ * Use this function if you want to serve up a page with a single 304
+ * that gets required files' new versions. Useful if you have a lot of 
+ * files and can tell on page load what version each file needs to be 
+ * at to be current.
+ *
+ * @param {object} next - a mapping of filenames to up-to-date versions
+ */
+DiffStore.prototype.setNextVersions = function (next) {
+	for(var filename in next) {
+		this.next[filename] = next[filename];
+	}
+};
+
+/**
+ * Attaches a tag to the page to load an asset
+ *
+ * @param {string} filename
+ * @param {function} callback
+ */
+DiffStore.prototype.get = function (filename, callback) {
+	var cached = this.retrieveCachedCopy(filename),
+		next = this.next[filename],
+		query = {diff: 1},
+		ctx = this;
+	
+	if(cached) {
+		query.version = cached.version;
+
+		if(next) {
+			if(next === cached.version) {
+				setTimeout(function () {
+					callback(cached);
+				});
+				return;
+			}
+			else {
+				query.next = next;
+			}
+		}
+		
+		JSONP.get(this.root + filename, query, function (data) {
+			var content = patch(cached.content, data.delta);
+			ctx.saveCachedCopy(filename, data.version, content);
+			callback(ctx.retrieveCachedCopy(filename));
+		});
+	}
+	else {
+		JSONP.get(this.root + filename, query, function (data) {
+			ctx.saveCachedCopy(filename, data.version, data.content);
+			callback(ctx.retrieveCachedCopy(filename));
+		});
+	}
+};
+
+/**
+ * Retrieves a file from localstorage.
+ * @param {string} filename
+ * @return {bool|null|object} - Returns false if localstorage is not available.
+ *	returns an object containing the filename and version if it is. Returns null if
+ *	the file is not cached in localstorage.
+ */
+DiffStore.prototype.retrieveCachedCopy = function (filename) {
+	var item;
+
+	if(this.localStorage) {
+		try {
+			item = this.localStorage.getItem(this.prefix + '-' + filename);
+			return JSON.parse(item);
+		}
+		catch(e) {
+			return false;
+		}
+	}
+	else {
+		return false;
+	}
+};
+
+/**
+ * @param {string} filename
+ * @param {string} version
+ * @param {string} content
+ */
+DiffStore.prototype.saveCachedCopy = function (filename, version, content) {
+	var item = {
+		name: filename,
+		version: version,
+		content: content
+	};
+
+	if(this.localStorage) {
+		try {
+			this.localStorage.setItem(this.prefix + '-' + filename, JSON.stringify(item));
+			return true;
+		}
+		catch(e) {
+			return false;
+		}
+	}
+	else {
+		return false;
+	}
+};
+
+module.exports = DiffStore;
+
+},{"./JSONP":4,"./patch":6}],4:[function(require,module,exports){
+var JSONP = {},
+	cbcount = 0;
+
+/**
+ * @param {string} url
+ * @param {object} query
+ * @param {function} callback
+ */
+JSONP.get = function (url, query, callback) {
+	var head = document.documentElement.childNodes[0],
+		querystring = [],
+		key,
+		val,
+		element;
+
+	if(query === undefined) {
+		query = {};
+	} 
+		
+	query.callback = (function (cbcount) {
+		return 'JSONP.callbacks[' + cbcount + ']';
+	}(cbcount));
+
+	JSONP.callbacks[cbcount] = callback;	
+	cbcount++;
+
+	for(key in query) {
+		if(query.hasOwnProperty(key)) {
+			val = encodeURIComponent(query[key]);
+			querystring.push(key + '=' + val);
+		}
+	}
+	
+	element = document.createElement('script');
+	element.src = url + '?' + querystring.join('&');
+	head.appendChild(element);
+};
+
+JSONP.callbacks = [];
+
+module.exports = window.JSONP = JSONP;
+},{}],5:[function(require,module,exports){
+/* global require */
+var Messenger = require('../common/Messenger'),
+	DiffStore = require('../iframe/DiffStore'),
+	requests = {},
+	diffstore,
+	messenger;
+
+
+messenger = new Messenger(window.parent);
+diffstore = new DiffStore({
+	root: '/',
+	prefix: 'diffserv'
+});
+
+/**
+ * Window -> Iframe 'request'
+ * @param {string} filename
+ */
+messenger.on('ds-request', function (filename) {
+	if(requests[filename]) {
+		throw new Error(filename + ' requested more than once.');
+	}
+	else {
+		requests[filename] = true;
+		diffstore.get(filename, function (data) {
+			messenger.post('ds-response', data);
+		});
+	}
+});
+
+messenger.post('ds-iframe-ready', {});
+
+},{"../common/Messenger":2,"../iframe/DiffStore":3}],6:[function(require,module,exports){
+	
+var patch = function(original, patch) {
+    var original_lines = original.split("\n");
+    var patch_lines = patch.split("\n");
+    var output_lines = [];
+    var patch_index = 0;
+    var copy_index = 0;
+    while(patch_index < patch_lines.length) {
+        var block_indices = patch_lines[patch_index].split(",");
+        var block_start = block_indices[0];
+        var block_end = block_indices[1];
+        var block_inserts = block_indices[2];
+        while(copy_index < block_start) {
+            output_lines.push(original_lines[copy_index]);
+            copy_index = copy_index + 1;
+        }
+        patch_index = patch_index + 1;
+        for(i = 0; i < block_inserts; i++) {
+            output_lines.push(patch_lines[patch_index]);
+            patch_index = patch_index + 1;
+        }
+        copy_index = Number(block_end);
+    }
+    while(copy_index < original_lines.length) {
+        output_lines.push(original_lines[copy_index]);
+        copy_index = copy_index + 1;
+    }
+    return output_lines.join("\n");
+}
+
+module.exports = patch;
+
+},{}]},{},[5])</script><body></html>
